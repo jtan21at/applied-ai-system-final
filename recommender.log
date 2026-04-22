@@ -1,0 +1,6 @@
+2026-04-22 10:29:25,859 [INFO] __main__: VibeFinder starting up
+2026-04-22 10:29:25,859 [INFO] recommender: Loaded 20 songs from 'data/songs.csv'
+2026-04-22 10:29:25,859 [INFO] recommender: Recommendations for genre='pop' mood='happy' energy=0.85: top='Sunrise City' score=3.97 confidence=0.88
+2026-04-22 10:29:25,859 [INFO] recommender: Recommendations for genre='lofi' mood='chill' energy=0.35: top='Library Rain' score=4.50 confidence=1.00
+2026-04-22 10:29:25,859 [INFO] recommender: Recommendations for genre='rock' mood='intense' energy=0.92: top='Storm Runner' score=3.99 confidence=0.89
+2026-04-22 10:29:25,860 [INFO] __main__: VibeFinder finished

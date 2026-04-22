@@ -21,7 +21,7 @@ VibeFinder reads each song's attributes and compares them to what the user said 
 - **Energy closeness** contributes up to 1 point—the closer the song's energy is to what the user wants, the more points it earns. A perfect energy match adds 1 full point; a song at the opposite end adds nearly 0.
 - **Acoustic bonus** adds 0.5 points if the user likes acoustic sounds and the song is very acoustic (acousticness ≥ 0.6).
 
-After every song is scored, they are sorted from highest to lowest. The top 5 are returned, each accompanied by a plain-language explanation of why it scored the way it did.
+After every song is scored, they are sorted from highest to lowest. The top 5 are returned, each accompanied by a plain-language explanation of why it scored the way it did, plus a **confidence score** (raw score ÷ 4.5) that tells the user how strongly the result matched their preferences.
 
 ---
 
@@ -38,9 +38,10 @@ After every song is scored, they are sorted from highest to lowest. The top 5 ar
 ## 5. Strengths
 
 - **Transparent:** every recommendation comes with an explanation that any user can read and verify.
+- **Reliable:** confidence scoring quantifies how well each recommendation matches the user's preferences, so the system communicates its own certainty.
+- **Safe inputs:** the guardrail layer (`validate_user_prefs`) rejects invalid inputs with clear errors rather than silently producing garbage output.
+- **Observable:** all events are logged to `recommender.log`, making it straightforward to audit what the system did and why.
 - **Fast:** even a naive loop over 20 songs is instantaneous; the design scales to thousands without algorithmic changes.
-- **Intuitive for clear profiles:** when tested with a "high-energy pop / happy" profile, the top two results were the two happiest, most energetic pop songs in the catalog—exactly what a human curator would pick.
-- **Acoustic bonus works well** for lofi/ambient profiles—those genres naturally have high acousticness, so the bonus rewards the right songs without needing extra configuration.
 
 ---
 
@@ -51,35 +52,81 @@ After every song is scored, they are sorted from highest to lowest. The top 5 ar
 - **No diversity logic:** the system does not prevent recommending multiple songs from the same artist. Neon Echo or LoRoom can appear twice in the same top-5 list.
 - **Binary matching:** genre and mood are either an exact match or zero points. There is no concept of "rock is closer to metal than it is to lofi." A rock fan asking for "intense" will get 0 genre points for a metal song if it is labelled differently.
 - **Static profile:** the system assumes a single fixed taste and does not learn or adapt.
+- **Silent filter-bubble degradation:** if the catalog has no songs matching a requested mood (e.g., `mood=sad` with `genre=pop`), the mood point is never awarded to any song and the user silently receives recommendations that ignore that preference. Confidence scoring partially surfaces this — the conflicting-preference edge case scored 66% confidence vs. 88–100% for well-served profiles — but an explicit warning message would be more helpful.
 
 ---
 
 ## 7. Evaluation
 
-Three distinct user profiles were tested:
+### Automated Test Results (pytest – 14 unit tests)
+
+All 14 unit tests pass. Tests cover:
+- Sorting correctness of recommendations
+- Explanation string generation
+- Confidence scoring (perfect score, zero score, clamping, partial score)
+- `recommend_with_confidence` 4-tuple structure and sort order
+- Guardrail validation (energy out of range, empty genre, empty mood, non-string genre)
+
+### Evaluation Harness Results (src/evaluate.py – 8 test cases)
+
+| Test Case | Result | Top Song | Score | Confidence |
+|---|---|---|---|---|
+| High-Energy Pop | ✅ PASS | Sunrise City (pop) | 3.97 | 88% |
+| Chill Lofi Acoustic | ✅ PASS | Library Rain (lofi) | 4.50 | 100% |
+| Deep Intense Rock | ✅ PASS | Storm Runner (rock) | 3.99 | 89% |
+| Ambient Low Energy | ✅ PASS | Spacewalk Thoughts (ambient) | 4.47 | 99% |
+| Jazz Relaxed | ✅ PASS | Coffee Shop Stories (jazz) | 3.97 | 88% |
+| Edge Case – Conflicting Prefs | ✅ PASS | Gym Hero (pop) | 2.97 | 66% |
+| Guardrail – Invalid Energy | ✅ PASS | ValueError raised | — | — |
+| Guardrail – Empty Genre | ✅ PASS | ValueError raised | — | — |
+
+**Summary:** 8/8 tests passed. Average confidence across the 6 recommendation tests: **0.88**. The lowest-confidence result (0.66) corresponded to the known edge case where the catalog cannot serve the requested mood.
+
+### Manual Profile Comparison
 
 | Profile | Top Result | Score | Intuition check |
 |---|---|---|---|
-| High-Energy Pop (happy) | Sunrise City | 3.97 | ✅ Makes sense—genre + mood + energy all match |
-| Chill Lofi (chill, acoustic) | Library Rain | 4.50 | ✅ Highest acousticness in the catalog, matching genre+mood |
-| Deep Intense Rock (intense) | Storm Runner | 3.99 | ✅ Genre + mood + near-perfect energy for rock |
-
-An adversarial edge case was also tested: `genre=pop, mood=sad, energy=0.9` (conflicting preferences). The system returned pop songs with high energy because genre+energy outweighed the mood mismatch—there are no sad pop songs in the catalog, so the mood point was never awarded to any result. This is a clear filter-bubble effect: the missing mood label meant the user received songs that partially matched rather than no recommendation at all.
-
-A weight-shift experiment (genre weight doubled to 4.0) confirmed that the recommendations became almost entirely genre-driven, with mood and energy barely affecting the ranking order.
+| High-Energy Pop (happy) | Sunrise City | 3.97 | ✅ Genre + mood + energy all match |
+| Chill Lofi (chill, acoustic) | Library Rain | 4.50 | ✅ Genre + mood + near-perfect energy + acoustic bonus |
+| Deep Intense Rock (intense) | Storm Runner | 3.99 | ✅ Genre + mood + near-perfect energy |
+| Edge case (pop + sad + high energy) | Gym Hero | 2.97 | ⚠️ No sad pop song → mood ignored, confidence dropped to 66% |
 
 ---
 
-## 8. Future Work
+## 8. Limitations, Misuse, and Ethics
+
+**What are the limitations or biases?**
+The scoring weights encode the designer's assumption that genre is twice as important as mood. This is a value judgment, not a fact, and will frustrate users who care more about mood. The small, Western-centric catalog amplifies bias by limiting the variety of recommendations available to users of underrepresented genres.
+
+**Could this system be misused?**
+At this scale, the risk is low. However, if the catalog were expanded and the system were deployed, it could create filter bubbles by repeatedly recommending a narrow slice of music, discouraging listeners from exploring outside their stated preferences. A diversity penalty or serendipity injection could mitigate this.
+
+**What surprised you during testing?**
+The edge-case test was most revealing: a user asking for `pop + sad + high energy` silently received recommendations that ignored the `sad` preference because no such songs exist in the catalog. The confidence score dropped (66% vs. 88–100% for well-served profiles), which shows that the reliability layer was working — but a user-facing warning would make this even more transparent.
+
+---
+
+## 9. AI Collaboration Reflection
+
+AI assistance (GitHub Copilot / Claude) was used throughout this project for two categories of work:
+
+**Where AI was helpful:**
+- Drafting boilerplate code (CSV parsing loop, pytest fixtures, dataclass definitions) — the AI produced working first drafts that saved time on mechanical typing.
+- Suggesting the `compute_confidence = score / MAX_SCORE` normalization approach as a simple, interpretable way to add reliability scoring without adding complexity.
+
+**Where AI was unhelpful or wrong:**
+- When asked to suggest scoring weights, the AI proposed equal weights (genre=1.0, mood=1.0) as a "balanced" starting point. This produced poor results in testing — pop and lofi songs tied because the most important signal (genre) had no advantage. The weights had to be redesigned through human analysis of the test outputs.
+- The AI initially suggested a `pandas` DataFrame for scoring instead of a plain Python loop. This added a dependency without meaningfully improving readability or performance for a 20-song catalog, so the suggestion was rejected in favor of the simpler approach.
+
+**Takeaway:** AI tools are most valuable for tasks that are well-specified and repetitive. Tasks requiring judgment — choosing weights, deciding what failure modes matter, interpreting test results — still require human reasoning.
+
+---
+
+## 10. Future Work
 
 1. **Add collaborative filtering:** compare the current user's preferences to other users' listening history to surface unexpected but relevant songs.
 2. **Introduce a diversity penalty:** if the same artist already appears in the top results, apply a small score reduction to their remaining songs so the list stays varied.
 3. **Soft genre similarity:** group genres into a hierarchy (e.g., "indie pop" is closer to "pop" than to "metal") and award partial genre points for near-matches.
 4. **Expand the catalog:** 20 songs is far too small to represent any real user's taste. A catalog of 1,000+ songs across more global genres and moods would make the system meaningfully more useful.
-5. **Tempo proximity scoring:** add a scoring rule similar to energy for `tempo_bpm` so users who prefer a specific BPM range are served better.
-
----
-
-## 9. Personal Reflection
-
-Building VibeFinder revealed how much hidden judgment goes into every weight and threshold. Choosing "genre = 2.0" instead of "genre = 1.5" is not a technical decision—it is a value decision about what matters most to a listener. The system felt surprisingly smart when a profile matched the catalog well, and surprisingly dumb when the catalog had gaps. That gap between "feels smart" and "is actually smart" is exactly what makes real-world AI systems risky: users trust the output without seeing the edge cases. Working through the bias analysis made clear that every recommender inevitably encodes the assumptions of whoever built the dataset and designed the weights—a fact worth remembering any time an algorithm decides what music, news, or products you see.
+5. **User-facing confidence warnings:** when confidence falls below a threshold (e.g., 0.70), surface an explicit message explaining which preference could not be satisfied.
+6. **Tempo proximity scoring:** add a scoring rule similar to energy for `tempo_bpm` so users who prefer a specific BPM range are served better.
