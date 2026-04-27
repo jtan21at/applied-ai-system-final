@@ -114,3 +114,6 @@ You can add more tests in `tests/test_recommender.py`.
 See the complete **[Model Card](model_card.md)** for algorithm details, bias analysis, and evaluation results.
 
 Building this recommender made clear how much of what feels like "magic" in real apps is actually straightforward arithmetic—just done at enormous scale with far richer features. The surprising moment was discovering how a single weight choice (genre at 2.0 vs. 1.0) can completely change the character of a recommendation list. AI tools accelerated the boilerplate (CSV parsing, scoring loops) but every weight and rule still required a deliberate design decision that the AI could not make on its own.
+
+###Walkthrough is included: 
+https://www.loom.com/share/ce998e4ac52a42379b774a2950aa45ea
